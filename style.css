@@ -38,6 +38,41 @@ body {
   margin-top: 5px;
 }
 
+/* ===== ACESSO E EDIÇÃO (MESMA PALETA DO BOLETIM) ===== */
+[hidden] { display: none !important; }
+.acesso, .editor, .acoes-boletim {
+  background: #1a1a1a;
+  border: 1px solid #39ff14;
+  border-radius: 10px;
+  padding: 15px;
+  margin-bottom: 20px;
+}
+.acesso h2, .editor h2 { color: #39ff14; font-size: 1.2rem; }
+.acesso form { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.acesso input, .editor input {
+  background: #0d0d0d;
+  color: #e0e0e0;
+  border: 1px solid #39ff14;
+  border-radius: 4px;
+  padding: 8px;
+  max-width: 150px;
+}
+.acesso button, .editor button, .acoes-boletim button {
+  background: #1a1a1a;
+  color: #39ff14;
+  border: 1px solid #39ff14;
+  border-radius: 4px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: wait; }
+.acoes-boletim > div { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; }
+.editor fieldset { border: 1px solid #2a2a2a; padding: 10px; margin: 12px 0; }
+.editor legend { color: #39ff14; padding: 0 5px; }
+.editor label { display: inline-flex; flex-direction: column; margin: 5px 10px 5px 0; font-size: 0.85rem; }
+#estadoAcesso, #estadoSalvamento, #erroEditor { margin-top: 8px; }
+#erroEditor { color: #ff4d4d; }
+
 /* ===== CARDS DE RESUMO ===== */
 .cards {
   display: grid;

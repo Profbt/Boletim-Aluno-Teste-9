@@ -20,6 +20,77 @@ const disciplinas = [
   { disciplina: "Práticas Experimentais", tri1: 64, tri2: "6,6", tri3: 7.0, faltas: [1, 1, 1] }
 ];
 
+// Configuração fixa desta cópia: o PIN é informado pelo estudante, nunca gerado aqui.
+const CONFIG_ALUNO = Object.freeze({
+  turma: "9C",
+  numeroChamada: 21,
+  apiUrl: "https://boletim-api.profbt.com.br"
+});
+let disciplinasAtivas = [];
+let pinAtivo = null; // Apenas em memória enquanto este boletim estiver aberto.
+let ocupado = false;
+
+function copiaInicial() {
+  return {
+    disciplinas: disciplinas.map(function (item) {
+      return {
+        disciplina: item.disciplina,
+        tri1: normalizarNota(item.tri1),
+        tri2: normalizarNota(item.tri2),
+        tri3: normalizarNota(item.tri3),
+        faltas: item.faltas.slice()
+      };
+    })
+  };
+}
+
+function validarDados(dados) {
+  if (!dados || !Array.isArray(dados.disciplinas)) {
+    throw new Error("dados-invalidos");
+  }
+  return dados.disciplinas.map(function (item) {
+    if (!item || typeof item.disciplina !== "string" ||
+        !["tri1", "tri2", "tri3"].every(function (campo) {
+          const valor = item[campo];
+          return valor === null || (typeof valor === "number" && Number.isFinite(valor) && valor >= 0 && valor <= 100) ||
+            (typeof valor === "string" && /^\d+(?:[,.]\d+)?$/.test(valor.trim()) && normalizarNota(valor) !== null);
+        }) || !Array.isArray(item.faltas) || item.faltas.length !== 3 ||
+        !item.faltas.every(function (falta) { return Number.isSafeInteger(falta) && falta >= 0; })) {
+      throw new Error("dados-invalidos");
+    }
+    return {
+      disciplina: item.disciplina,
+      tri1: normalizarNota(item.tri1),
+      tri2: normalizarNota(item.tri2),
+      tri3: normalizarNota(item.tri3),
+      faltas: item.faltas.slice()
+    };
+  });
+}
+
+function mensagemErro(erro) {
+  if (erro.message === "401") return "PIN ou acesso inválido. Confira o PIN e tente novamente.";
+  if (erro.message === "429") return "Muitas tentativas. Aguarde um pouco antes de tentar novamente.";
+  if (erro.message === "dados-invalidos") return "A API retornou dados inválidos. Tente novamente mais tarde.";
+  return "Não foi possível conectar à API. Confira sua conexão e tente novamente.";
+}
+
+async function requisitarBoletim(caminho, metodo, pin, dados) {
+  const corpo = {
+    turma: CONFIG_ALUNO.turma,
+    numero_chamada: CONFIG_ALUNO.numeroChamada,
+    pin: pin
+  };
+  if (dados !== undefined) corpo.dados = dados;
+  const resposta = await fetch(CONFIG_ALUNO.apiUrl + "/api/v1/boletins/" + caminho, {
+    method: metodo,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(corpo)
+  });
+  if (!resposta.ok) throw new Error(String(resposta.status));
+  return resposta.json();
+}
+
 // ============================================================
 // FUNÇÃO: normalizarNota
 // ============================================================
@@ -144,14 +215,14 @@ function criarLinhaTabela(item) {
   // Cria o elemento <tr>
   const tr = document.createElement("tr");
 
-  tr.innerHTML =
-    "<td>" + item.disciplina + "</td>" +
-    "<td>" + formatarNota(n1) + "</td>" +
-    "<td>" + formatarNota(n2) + "</td>" +
-    "<td>" + formatarNota(n3) + "</td>" +
-    "<td>" + (media === null ? "Ainda não lançada" : formatarNota(media)) + "</td>" +
-    "<td>" + totalFaltas + "</td>" +
-    "<td class='" + classeSituacao + "'>" + situacao + "</td>";
+  [item.disciplina, formatarNota(n1), formatarNota(n2), formatarNota(n3),
+    media === null ? "Ainda não lançada" : formatarNota(media),
+    String(totalFaltas), situacao].forEach(function (texto, indice) {
+    const td = document.createElement("td");
+    td.textContent = texto;
+    if (indice === 6) td.className = classeSituacao;
+    tr.appendChild(td);
+  });
 
   return tr;
 }
@@ -162,8 +233,9 @@ function criarLinhaTabela(item) {
 // Percorre todas as disciplinas e adiciona as linhas na tabela.
 function preencherTabela() {
   const corpo = document.getElementById("corpo-tabela");
+  corpo.replaceChildren();
 
-  disciplinas.forEach(function (item) {
+  disciplinasAtivas.forEach(function (item) {
     const linha = criarLinhaTabela(item);
     corpo.appendChild(linha);
   });
@@ -180,7 +252,7 @@ function preencherCards() {
   let totalBom = 0;
   let totalAtencao = 0;
 
-  disciplinas.forEach(function (item) {
+  disciplinasAtivas.forEach(function (item) {
     const n1 = normalizarNota(item.tri1);
     const n2 = normalizarNota(item.tri2);
     const n3 = normalizarNota(item.tri3);
@@ -216,8 +288,151 @@ function preencherCards() {
 // ============================================================
 // INICIALIZAÇÃO
 // ============================================================
-// Quando a página terminar de carregar, preenche tabela e cards.
+// Quando a página terminar de carregar, configura acesso e editor.
 document.addEventListener("DOMContentLoaded", function () {
-  preencherTabela();
-  preencherCards();
+  const porId = function (id) { return document.getElementById(id); };
+  const acesso = porId("formAcesso");
+  const editor = porId("formEditor");
+
+  acesso.addEventListener("submit", async function (evento) {
+    evento.preventDefault();
+    if (ocupado) return;
+    const pin = porId("pinAluno").value.trim();
+    if (!pin) {
+      porId("estadoAcesso").textContent = "Informe seu PIN.";
+      return;
+    }
+    ocupado = true;
+    porId("botaoAcessar").disabled = true;
+    porId("estadoAcesso").textContent = "Abrindo boletim…";
+    try {
+      const resposta = await requisitarBoletim("abrir", "POST", pin);
+      // dados:null não implica erro, mesmo quando novo:false.
+      const lista = resposta.dados === null ? copiaInicial().disciplinas : validarDados(resposta.dados);
+      disciplinasAtivas = lista;
+      pinAtivo = pin;
+      porId("pinAluno").value = "";
+      preencherTabela();
+      preencherCards();
+      porId("origemDados").textContent = resposta.dados === null
+        ? "Dados iniciais de teste (ainda não salvos)."
+        : "Dados carregados da API.";
+      porId("estadoSalvamento").textContent = "";
+      porId("estadoAcesso").textContent = "";
+      porId("painelAcesso").hidden = true;
+      porId("painelBoletim").hidden = false;
+    } catch (erro) {
+      porId("estadoAcesso").textContent = mensagemErro(erro);
+    } finally {
+      ocupado = false;
+      porId("botaoAcessar").disabled = false;
+    }
+  });
+
+  porId("botaoSair").addEventListener("click", function () {
+    if (ocupado) return;
+    pinAtivo = null;
+    disciplinasAtivas = [];
+    porId("linhasEditor").replaceChildren();
+    porId("painelEditor").hidden = true;
+    porId("corpo-tabela").replaceChildren();
+    porId("painelBoletim").hidden = true;
+    porId("painelAcesso").hidden = false;
+    porId("pinAluno").value = "";
+    porId("estadoAcesso").textContent = "";
+    porId("estadoSalvamento").textContent = "";
+  });
+
+  porId("botaoEditar").addEventListener("click", function () {
+    if (ocupado || pinAtivo === null) return;
+    const linhas = porId("linhasEditor");
+    linhas.replaceChildren();
+    disciplinasAtivas.forEach(function (item, indice) {
+      const grupo = document.createElement("fieldset");
+      const titulo = document.createElement("legend");
+      titulo.textContent = item.disciplina;
+      grupo.appendChild(titulo);
+      ["tri1", "tri2", "tri3", "falta0", "falta1", "falta2"].forEach(function (campo, posicao) {
+        const rotulo = document.createElement("label");
+        rotulo.textContent = posicao < 3 ? (posicao + 1) + "º tri — nota" : (posicao - 2) + "º tri — faltas";
+        const input = document.createElement("input");
+        input.type = "text";
+        input.inputMode = posicao < 3 ? "decimal" : "numeric";
+        input.dataset.campo = campo;
+        input.dataset.indice = String(indice);
+        const valor = posicao < 3 ? item[campo] : item.faltas[posicao - 3];
+        input.value = valor === null ? "" : String(valor).replace(".", ",");
+        rotulo.appendChild(input);
+        grupo.appendChild(rotulo);
+      });
+      linhas.appendChild(grupo);
+    });
+    porId("erroEditor").textContent = "";
+    porId("painelEditor").hidden = false;
+  });
+
+  porId("botaoCancelar").addEventListener("click", function () {
+    if (ocupado) return;
+    porId("painelEditor").hidden = true;
+    porId("linhasEditor").replaceChildren();
+    porId("erroEditor").textContent = "";
+  });
+
+  editor.addEventListener("submit", async function (evento) {
+    evento.preventDefault();
+    if (ocupado || pinAtivo === null || porId("painelEditor").hidden) return;
+    const campos = Array.from(porId("linhasEditor").querySelectorAll("input"));
+    const copia = disciplinasAtivas.map(function (item) {
+      return { disciplina: item.disciplina, tri1: item.tri1, tri2: item.tri2,
+        tri3: item.tri3, faltas: item.faltas.slice() };
+    });
+    for (const campo of campos) {
+      const indice = Number(campo.dataset.indice);
+      const texto = campo.value.trim();
+      const chave = campo.dataset.campo;
+      if (chave.startsWith("falta")) {
+        if (!/^\d+$/.test(texto) || !Number.isSafeInteger(Number(texto))) {
+          porId("erroEditor").textContent = "Faltas devem ser números inteiros a partir de zero.";
+          campo.focus();
+          return;
+        }
+        copia[indice].faltas[Number(chave.slice(-1))] = Number(texto);
+      } else {
+        const numero = Number(texto.replace(",", "."));
+        if (texto !== "" && (!/^(?:\d+)(?:[,.]\d+)?$/.test(texto) || numero < 0 || numero > 10)) {
+          porId("erroEditor").textContent = "Notas devem estar entre 0 e 10 (use vírgula ou ponto), ou ficar vazias.";
+          campo.focus();
+          return;
+        }
+        copia[indice][chave] = texto === "" ? null : numero;
+      }
+    }
+    porId("erroEditor").textContent = "";
+    porId("estadoSalvamento").textContent = "Salvando boletim…";
+    ocupado = true;
+    porId("botaoSalvar").disabled = true;
+    porId("botaoCancelar").disabled = true;
+    porId("botaoEditar").disabled = true;
+    porId("botaoSair").disabled = true;
+    try {
+      const resposta = await requisitarBoletim("salvar", "PUT", pinAtivo, { disciplinas: copia });
+      if (!resposta || resposta.ok !== true) throw new Error("salvamento-recusado");
+      disciplinasAtivas = copia;
+      preencherTabela();
+      preencherCards();
+      porId("origemDados").textContent = "Dados carregados da API.";
+      porId("painelEditor").hidden = true;
+      porId("linhasEditor").replaceChildren();
+      porId("estadoSalvamento").textContent = "Dados salvos com sucesso.";
+    } catch (erro) {
+      porId("estadoSalvamento").textContent = mensagemErro(erro);
+      porId("erroEditor").textContent = "As alterações não foram salvas. Corrija ou tente novamente.";
+    } finally {
+      ocupado = false;
+      porId("botaoSalvar").disabled = false;
+      porId("botaoCancelar").disabled = false;
+      porId("botaoEditar").disabled = false;
+      porId("botaoSair").disabled = false;
+    }
+  });
 });

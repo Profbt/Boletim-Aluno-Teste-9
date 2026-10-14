@@ -12,8 +12,41 @@
   <header class="cabecalho">
     <h1>Boletim Digital</h1>
     <p class="subtitulo">9º Ano</p>
-    <p class="estudante">Estudante Exemplo</p>
+    <p class="estudante">Turma 9C · chamada 21</p>
   </header>
+
+  <!-- ACESSO AO BOLETIM -->
+  <section class="acesso" id="painelAcesso">
+    <h2>Acessar boletim</h2>
+    <p>Informe seu PIN para consultar e editar as notas e faltas desta chamada.</p>
+    <form id="formAcesso">
+      <label for="pinAluno">PIN</label>
+      <input id="pinAluno" type="password" autocomplete="off" required>
+      <button id="botaoAcessar" type="submit">Abrir boletim</button>
+    </form>
+    <p id="estadoAcesso" role="status" aria-live="polite"></p>
+  </section>
+
+  <div id="painelBoletim" hidden>
+    <div class="acoes-boletim">
+      <p id="origemDados" role="status"></p>
+      <div>
+        <button id="botaoEditar" type="button">Editar notas e faltas</button>
+        <button id="botaoSair" type="button">Trocar acesso</button>
+      </div>
+      <p id="estadoSalvamento" role="status" aria-live="polite"></p>
+    </div>
+
+    <section class="editor" id="painelEditor" hidden>
+      <h2>Editar boletim</h2>
+      <p>Notas de 0 a 10 (vazio = não lançada); faltas inteiras a partir de zero.</p>
+      <form id="formEditor" novalidate>
+        <div id="linhasEditor"></div>
+        <button id="botaoSalvar" type="submit">Salvar na API</button>
+        <button id="botaoCancelar" type="button">Cancelar edição</button>
+      </form>
+      <p id="erroEditor" role="alert"></p>
+    </section>
 
   <!-- CARDS DE RESUMO -->
   <section class="cards">
@@ -59,6 +92,8 @@
       </tbody>
     </table>
   </section>
+
+  </div>
 
   <script src="script.js"></script>
 </body>
